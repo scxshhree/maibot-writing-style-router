@@ -27,6 +27,13 @@ class SemanticConfig(PluginConfigBase):
     timeout_seconds: float = Field(default=4.0, ge=1.0, le=10.0, description="语义分类最长等待时间")
 
 
+class HumanizerConfig(PluginConfigBase):
+    enabled: bool = Field(default=True, description="回复后启用活人感审核")
+    model: str = Field(default="utils", description="活人感审核使用的模型任务")
+    timeout_seconds: float = Field(default=8.0, ge=2.0, le=20.0, description="活人感审核最长等待时间")
+    min_characters: int = Field(default=12, ge=4, le=100, description="低于此长度的回复直接跳过审核")
+
+
 class StylesConfig(PluginConfigBase):
     modern: bool = Field(default=True, description="启用现代口语写作规则")
     comedy_web: bool = Field(default=True, description="启用搞笑网文规则")
@@ -40,6 +47,7 @@ class PluginConfig(PluginConfigBase):
     plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     semantic: SemanticConfig = Field(default_factory=SemanticConfig)
+    humanizer: HumanizerConfig = Field(default_factory=HumanizerConfig)
     styles: StylesConfig = Field(default_factory=StylesConfig)
 
 
@@ -61,6 +69,9 @@ WRITE_MARKERS = ("写一段", "写几段", "写个", "创作", "续写", "改写
 REVIEW_MARKERS = ("评文", "点评", "看看这段", "这段有什么问题", "哪里有问题", "分析文风", "帮我看文", "帮我看看文")
 SESSION_CACHE_LIMIT = 512
 SEMANTIC_CANDIDATE_MARKERS = ("这段", "文章", "正文", "小说", "文风", "写", "改", "续", "润色", "示例", "看看", "评")
+HUMANIZER_SYSTEM_PROMPT = """你是群聊回复的活人感审核助手。只改措辞，不改原回复表达的事实、结论、数字、时间、人名、专有名词、链接、路径、代码、命令或茶茶的核心态度。
+去掉明显的客服腔、模板化开场、过度礼貌、机械总结、重复句式、空泛拔高、假装深刻和生硬的过渡。保留自然的口语、停顿、轻微不完整、网络表达和适度玩笑，但不要强行加梗、emoji、第一人称或新信息。
+如果原文已经自然，原样输出。只输出最终回复，不要解释、引号、前缀或代码块。"""
 
 
 def _flatten(value: Any, limit: int = 6000) -> str:
@@ -235,6 +246,55 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
         except (asyncio.TimeoutError, asyncio.CancelledError):
             task.cancel()
             return None
+
+    @HookHandler(
+        "maisaka.replyer.after_response",
+        name="humanize_response",
+        description="回复发送前用小模型清理明显 AI 腔，保持原意和事实不变。",
+        mode=HookMode.BLOCKING,
+        order=HookOrder.NORMAL,
+        timeout_ms=10000,
+        error_policy=ErrorPolicy.SKIP,
+    )
+    async def humanize_response(self, response: str = "", **kwargs: Any) -> dict[str, Any] | None:
+        del kwargs
+        if not self.config.plugin.enabled or not self.config.humanizer.enabled:
+            return None
+        original = str(response or "").strip()
+        if len(original) < self.config.humanizer.min_characters or "```" in original:
+            return None
+        try:
+            result = await asyncio.wait_for(
+                self.ctx.llm.generate(
+                    [
+                        {"role": "system", "content": HUMANIZER_SYSTEM_PROMPT},
+                        {"role": "user", "content": f"原回复：\n{original[:6000]}"},
+                    ],
+                    model=self.config.humanizer.model,
+                    temperature=0.15,
+                    max_tokens=min(12000, max(160, len(original) * 2)),
+                ),
+                timeout=self.config.humanizer.timeout_seconds,
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError, OSError, TypeError, ValueError) as exc:
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            self.ctx.logger.debug("活人感审核跳过：%s", exc)
+            return None
+        if isinstance(result, dict) and isinstance(result.get("result"), dict):
+            result = result["result"]
+        if not isinstance(result, dict) or not result.get("success"):
+            return None
+        rewritten = str(result.get("response") or "").strip()
+        if not rewritten or "```" in rewritten:
+            return None
+        ratio = len(rewritten) / len(original)
+        if ratio < 0.55 or ratio > 1.45:
+            self.ctx.logger.debug("活人感审核输出长度异常，保留原回复：%.2f", ratio)
+            return None
+        if rewritten == original:
+            return None
+        return {"action": "continue", "modified_kwargs": {"response": rewritten}}
 
 
 def create_plugin() -> WritingStyleRouterPlugin:

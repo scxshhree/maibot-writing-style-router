@@ -7,6 +7,7 @@ An on-demand writing prompt plugin for MaiBot. It observes the current user mess
 - No writing prompt injection for normal chat, technical questions, or casual group replies.
 - Clear keyword matches avoid an additional classifier call, and the full chat context is never copied.
 - Suspected writing requests can use a small `utils` model for semantic classification; the task is prefetched when the message arrives and has a timeout.
+- Replies can be checked by a small `utils` model before sending; short replies, emoji-only replies, and code blocks are skipped.
 - Composable routing for modern conversational prose, comedy web fiction, Japanese ACG light novels, anti-cliche editing, lifelike characterization, and text review.
 - MaiBot-unknown macros, variables, and hidden chain-of-thought instructions have been removed.
 - The default documentation is the Chinese [README.md](README.md).
@@ -36,6 +37,8 @@ See [config.toml](config.toml):
 - `styles.*`: enable or disable individual style groups.
 
 The plugin preserves the existing `extra_prompt` and appends its route result, so it can work alongside character-memory and other prompt-injection plugins. Clear keyword matches use the zero-wait fast path; only ambiguous candidate messages use the semantic classifier.
+
+The post-response review is deliberately conservative. It preserves meaning, facts, numbers, links, paths, commands, code, and the character's attitude while removing obvious customer-service phrasing, formulaic openings, mechanical summaries, and stiff transitions. Timeouts, malformed output, or large edits keep the original response.
 
 ## Installation
 

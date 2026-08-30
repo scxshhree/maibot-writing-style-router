@@ -11,6 +11,12 @@ enabled = true
 model = "utils"
 timeout_seconds = 4.0
 
+[humanizer]
+enabled = true
+model = "utils"
+timeout_seconds = 8.0
+min_characters = 12
+
 [styles]
 modern = true
 comedy_web = true
