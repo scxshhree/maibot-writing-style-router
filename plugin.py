@@ -30,7 +30,7 @@ class SemanticConfig(PluginConfigBase):
 class HumanizerConfig(PluginConfigBase):
     enabled: bool = Field(default=True, description="回复后启用活人感审核")
     model: str = Field(default="utils", description="活人感审核使用的模型任务")
-    timeout_seconds: float = Field(default=20.0, ge=2.0, le=20.0, description="活人感审核最长等待时间")
+    timeout_seconds: float = Field(default=125.0, ge=2.0, le=125.0, description="活人感审核最长等待时间")
     min_characters: int = Field(default=12, ge=4, le=100, description="低于此长度的回复直接跳过审核")
 
 
