@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "github.scxshhree.writing-style-router",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name": "写作风格路由",
   "description": "仅在明确创作或评文请求时，按意图注入对应写作规则。",
   "author": {"name": "scxshhree", "url": "https://github.com/scxshhree"},

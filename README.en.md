@@ -38,7 +38,7 @@ See [config.toml](config.toml):
 
 The plugin preserves the existing `extra_prompt` and appends its route result, so it can work alongside character-memory and other prompt-injection plugins. Clear keyword matches use the zero-wait fast path; only ambiguous candidate messages use the semantic classifier.
 
-The post-response review is deliberately conservative. It preserves meaning, facts, numbers, links, paths, commands, code, and the character's attitude while removing obvious customer-service phrasing, formulaic openings, mechanical summaries, and stiff transitions. Timeouts, malformed output, or large edits keep the original response.
+The post-response review is deliberately conservative. It preserves meaning, facts, numbers, links, paths, commands, code, and the character's attitude while removing obvious customer-service phrasing, formulaic openings, mechanical summaries, and stiff transitions. It waits up to 20 seconds by default; timeouts, malformed output, or large edits keep the original response.
 
 ## Installation
 
