@@ -253,7 +253,7 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
         description="回复发送前用小模型清理明显 AI 腔，保持原意和事实不变。",
         mode=HookMode.BLOCKING,
         order=HookOrder.NORMAL,
-        timeout_ms=10000,
+        timeout_ms=130000,
         error_policy=ErrorPolicy.SKIP,
     )
     async def humanize_response(self, response: str = "", **kwargs: Any) -> dict[str, Any] | None:
