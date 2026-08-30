@@ -1,0 +1,15 @@
+[plugin]
+enabled = true
+config_version = "1.0.0"
+
+[routing]
+max_prompt_characters = 5200
+default_mode = "auto"
+
+[styles]
+modern = true
+comedy_web = true
+acg_light_novel = true
+anti_cliche = true
+character_lifelike = true
+review = true
