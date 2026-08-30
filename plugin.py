@@ -31,7 +31,6 @@ class HumanizerConfig(PluginConfigBase):
     enabled: bool = Field(default=True, description="回复后启用活人感审核")
     model: str = Field(default="utils", description="活人感审核使用的模型任务")
     timeout_seconds: float = Field(default=125.0, ge=2.0, le=125.0, description="活人感审核最长等待时间")
-    min_characters: int = Field(default=12, ge=4, le=100, description="低于此长度的回复直接跳过审核")
 
 
 class StylesConfig(PluginConfigBase):
@@ -69,8 +68,8 @@ WRITE_MARKERS = ("写一段", "写几段", "写个", "创作", "续写", "改写
 REVIEW_MARKERS = ("评文", "点评", "看看这段", "这段有什么问题", "哪里有问题", "分析文风", "帮我看文", "帮我看看文")
 SESSION_CACHE_LIMIT = 512
 SEMANTIC_CANDIDATE_MARKERS = ("这段", "文章", "正文", "小说", "文风", "写", "改", "续", "润色", "示例", "看看", "评")
-HUMANIZER_SYSTEM_PROMPT = """你是群聊回复的活人感审核助手。只改措辞，不改原回复表达的事实、结论、数字、时间、人名、专有名词、链接、路径、代码、命令或茶茶的核心态度。
-去掉明显的客服腔、模板化开场、过度礼貌、机械总结、重复句式、空泛拔高、假装深刻和生硬的过渡。保留自然的口语、停顿、轻微不完整、网络表达和适度玩笑，但不要强行加梗、emoji、第一人称或新信息。
+HUMANIZER_SYSTEM_PROMPT = """你是茶茶每条群聊回复发送前的活人感审核助手。只改措辞，不改原回复表达的事实、结论、数字、时间、人名、专有名词、链接、路径、代码、命令或茶茶的核心态度。
+优先把审计报告腔、客服腔、模板化开场、过度礼貌、机械总结、重复句式、空泛拔高、假装深刻和生硬过渡改成像熟人即时聊天。先保留结论，再用自然口语、短句、停顿、网络表达和最多一个轻茶点接住；技术问题也可以轻轻吐槽，但不能盖过事实和步骤。保留茶茶的网感与判断，不要强行加梗、emoji、第一人称或新信息。
 如果原文已经自然，原样输出。只输出最终回复，不要解释、引号、前缀或代码块。"""
 
 
@@ -261,7 +260,7 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
         if not self.config.plugin.enabled or not self.config.humanizer.enabled:
             return None
         original = str(response or "").strip()
-        if len(original) < self.config.humanizer.min_characters or "```" in original:
+        if not original:
             return None
         try:
             result = await asyncio.wait_for(

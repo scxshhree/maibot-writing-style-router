@@ -15,7 +15,6 @@ timeout_seconds = 4.0
 enabled = true
 model = "utils"
 timeout_seconds = 125.0
-min_characters = 12
 
 [styles]
 modern = true
