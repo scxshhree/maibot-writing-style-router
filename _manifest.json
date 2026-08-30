@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "github.scxshhree.writing-style-router",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "name": "写作风格路由",
   "description": "仅在明确创作或评文请求时，按意图注入对应写作规则。",
   "author": {"name": "scxshhree", "url": "https://github.com/scxshhree"},
@@ -13,6 +13,6 @@
   "host_application": {"min_version": "1.0.12", "max_version": "999999.0.0"},
   "sdk": {"min_version": "2.7.0", "max_version": "2.99.99"},
   "dependencies": [],
-  "capabilities": [],
+  "capabilities": ["llm.generate"],
   "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]}
 }

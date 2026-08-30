@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import OrderedDict
 from typing import Any
@@ -20,6 +21,12 @@ class RoutingConfig(PluginConfigBase):
     default_mode: str = Field(default="auto", description="自动识别模式")
 
 
+class SemanticConfig(PluginConfigBase):
+    enabled: bool = Field(default=True, description="对疑似写作请求启用 AI 语义补判")
+    model: str = Field(default="utils", description="语义分类使用的模型任务")
+    timeout_seconds: float = Field(default=4.0, ge=1.0, le=10.0, description="语义分类最长等待时间")
+
+
 class StylesConfig(PluginConfigBase):
     modern: bool = Field(default=True, description="启用现代口语写作规则")
     comedy_web: bool = Field(default=True, description="启用搞笑网文规则")
@@ -32,6 +39,7 @@ class StylesConfig(PluginConfigBase):
 class PluginConfig(PluginConfigBase):
     plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
+    semantic: SemanticConfig = Field(default_factory=SemanticConfig)
     styles: StylesConfig = Field(default_factory=StylesConfig)
 
 
@@ -52,6 +60,7 @@ STYLES = {
 WRITE_MARKERS = ("写一段", "写几段", "写个", "创作", "续写", "改写", "改成", "改为", "写成", "变成", "重写", "润色", "扩写", "仿写", "生成片段", "文风示例", "示例文本", "小说")
 REVIEW_MARKERS = ("评文", "点评", "看看这段", "这段有什么问题", "哪里有问题", "分析文风", "帮我看文", "帮我看看文")
 SESSION_CACHE_LIMIT = 512
+SEMANTIC_CANDIDATE_MARKERS = ("这段", "文章", "正文", "小说", "文风", "写", "改", "续", "润色", "示例", "看看", "评")
 
 
 def _flatten(value: Any, limit: int = 6000) -> str:
@@ -82,14 +91,21 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
 
     async def on_load(self) -> None:
         self._session_queries: OrderedDict[str, str] = OrderedDict()
+        self._semantic_tasks: dict[str, asyncio.Task[Any]] = {}
         self.ctx.logger.info("写作风格路由插件已加载")
 
     async def on_unload(self) -> None:
         self._session_queries.clear()
+        for task in self._semantic_tasks.values():
+            task.cancel()
+        self._semantic_tasks.clear()
 
     async def on_config_update(self, *args: Any, **kwargs: Any) -> None:
         del args, kwargs
         self._session_queries.clear()
+        for task in self._semantic_tasks.values():
+            task.cancel()
+        self._semantic_tasks.clear()
 
     @HookHandler(
         "chat.receive.before_process",
@@ -110,6 +126,11 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
             return None
         self._session_queries[session_id] = text
         self._session_queries.move_to_end(session_id)
+        if self.config.semantic.enabled and any(marker in text for marker in SEMANTIC_CANDIDATE_MARKERS):
+            old_task = self._semantic_tasks.pop(session_id, None)
+            if old_task is not None:
+                old_task.cancel()
+            self._semantic_tasks[session_id] = asyncio.create_task(self._classify_semantically(text))
         while len(self._session_queries) > SESSION_CACHE_LIMIT:
             self._session_queries.popitem(last=False)
         return None
@@ -140,6 +161,10 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
             return None
         is_review = any(marker in query for marker in REVIEW_MARKERS) and self.config.styles.review
         is_writing = any(marker in query for marker in WRITE_MARKERS)
+        semantic = None if is_review or is_writing else await self._get_semantic_result(session_id)
+        if not is_review and not is_writing and semantic is not None:
+            is_review = semantic.get("intent") == "review" and self.config.styles.review
+            is_writing = semantic.get("intent") == "write"
         if not is_review and not is_writing:
             return None
 
@@ -152,6 +177,13 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
             selected.append("comedy_web")
         if any(marker in query for marker in ("轻小说", "日系", "ACG", "二次元", "漫画感", "瀑布流")) and self.config.styles.acg_light_novel:
             selected.append("acg_light_novel")
+        if semantic is not None:
+            for style_name in semantic.get("styles", []):
+                if style_name in {"comedy_web", "acg_light_novel"} and style_name not in selected:
+                    if style_name == "comedy_web" and self.config.styles.comedy_web:
+                        selected.append(style_name)
+                    if style_name == "acg_light_novel" and self.config.styles.acg_light_novel:
+                        selected.append(style_name)
         if self.config.styles.anti_cliche:
             selected.append("anti_cliche")
         if self.config.styles.character_lifelike:
@@ -162,6 +194,47 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
         combined = "\n\n".join(item for item in (str(extra_prompt or "").strip(), prompt) if item)
         self.ctx.logger.debug("写作风格路由命中：mode=%s styles=%s chars=%s", "review" if is_review else "write", selected, len(prompt))
         return {"action": "continue", "modified_kwargs": {"extra_prompt": combined}}
+
+    async def _classify_semantically(self, text: str) -> dict[str, Any] | None:
+        prompt = (
+            "你是写作请求路由器。只分析下面这条用户消息，不回答它。\n"
+            "返回严格 JSON：{\"intent\":\"write|review|none\",\"styles\":[\"comedy_web\"或\"acg_light_novel\"]}。\n"
+            "write 仅表示用户要创作、续写、改写、润色或示例；review 表示用户要点评、评文或分析文本。"
+            "普通聊天、技术排错、泛泛讨论返回 none。只有用户明确要求时才填 style。\n"
+            f"用户消息：{text[:3000]}"
+        )
+        try:
+            result = await self.ctx.llm.generate(
+                prompt=prompt,
+                model=self.config.semantic.model,
+                temperature=0.0,
+                max_tokens=120,
+            )
+            if isinstance(result, dict) and isinstance(result.get("result"), dict):
+                result = result["result"]
+            response = str(result.get("response", "") if isinstance(result, dict) else "").strip()
+            start, end = response.find("{"), response.rfind("}")
+            if start < 0 or end <= start:
+                return None
+            data = json.loads(response[start : end + 1])
+            intent = data.get("intent")
+            if intent not in {"write", "review", "none"}:
+                return None
+            styles = data.get("styles", [])
+            return {"intent": intent, "styles": [s for s in styles if s in {"comedy_web", "acg_light_novel"}]}
+        except (asyncio.TimeoutError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            self.ctx.logger.debug("写作语义分类跳过：%s", exc)
+            return None
+
+    async def _get_semantic_result(self, session_id: str) -> dict[str, Any] | None:
+        task = self._semantic_tasks.pop(session_id, None)
+        if task is None:
+            return None
+        try:
+            return await asyncio.wait_for(task, timeout=self.config.semantic.timeout_seconds)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            task.cancel()
+            return None
 
 
 def create_plugin() -> WritingStyleRouterPlugin:
