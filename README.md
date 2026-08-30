@@ -1,6 +1,6 @@
 # 写作风格路由
 
-一个面向 MaiBot 的按需写作提示插件。它通过 `maisaka.replyer.before_request` 参与回复流程，只在本轮明确涉及创作或评文时追加对应规则。
+一个面向 MaiBot 的按需写作提示插件。它先通过 `chat.receive.before_process` 记录本轮用户原消息，再由 `maisaka.replyer.before_request` 按意图追加对应规则，只在本轮明确涉及创作或评文时生效。
 
 ## 特点
 

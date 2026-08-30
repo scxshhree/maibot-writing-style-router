@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from typing import Any
 
 from maibot_sdk import Field, HookHandler, MaiBotPlugin, PluginConfigBase
@@ -48,8 +49,9 @@ STYLES = {
     "review": """评文模式：不要改写成故事，也不要角色扮演。先限定当前看到的材料，再指出具体有效之处；随后按影响程度指出对白、节奏、视角、人物声纹、逻辑或陈词滥调问题，每条配一条可执行改法。区分确定问题与个人偏好，结论简洁但要有文本依据。""",
 }
 
-WRITE_MARKERS = ("写一段", "写几段", "写个", "创作", "续写", "改写", "重写", "润色", "扩写", "仿写", "生成片段", "文风示例", "示例文本", "小说")
+WRITE_MARKERS = ("写一段", "写几段", "写个", "创作", "续写", "改写", "改成", "改为", "写成", "变成", "重写", "润色", "扩写", "仿写", "生成片段", "文风示例", "示例文本", "小说")
 REVIEW_MARKERS = ("评文", "点评", "看看这段", "这段有什么问题", "哪里有问题", "分析文风", "帮我看文", "帮我看看文")
+SESSION_CACHE_LIMIT = 512
 
 
 def _flatten(value: Any, limit: int = 6000) -> str:
@@ -65,17 +67,52 @@ def _flatten(value: Any, limit: int = 6000) -> str:
         return str(value)[:limit]
 
 
+def _message_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    for key in ("processed_plain_text", "plain_text", "text"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:6000]
+    return ""
+
+
 class WritingStyleRouterPlugin(MaiBotPlugin):
     config_model = PluginConfig
 
     async def on_load(self) -> None:
+        self._session_queries: OrderedDict[str, str] = OrderedDict()
         self.ctx.logger.info("写作风格路由插件已加载")
 
     async def on_unload(self) -> None:
-        return None
+        self._session_queries.clear()
 
     async def on_config_update(self, *args: Any, **kwargs: Any) -> None:
         del args, kwargs
+        self._session_queries.clear()
+
+    @HookHandler(
+        "chat.receive.before_process",
+        name="observe_writing_request",
+        description="缓存本轮用户原消息，供写作风格路由识别。",
+        mode=HookMode.OBSERVE,
+        order=HookOrder.EARLY,
+        timeout_ms=500,
+        error_policy=ErrorPolicy.SKIP,
+    )
+    async def observe_writing_request(self, message: Any = None, **kwargs: Any) -> None:
+        del kwargs
+        if not self.config.plugin.enabled or not isinstance(message, dict):
+            return None
+        session_id = str(message.get("session_id") or "").strip()
+        text = _message_text(message)
+        if not session_id or not text or text.startswith("/"):
+            return None
+        self._session_queries[session_id] = text
+        self._session_queries.move_to_end(session_id)
+        while len(self._session_queries) > SESSION_CACHE_LIMIT:
+            self._session_queries.popitem(last=False)
+        return None
 
     @HookHandler(
         "maisaka.replyer.before_request",
@@ -88,6 +125,7 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
     )
     async def route_writing_style(
         self,
+        session_id: str = "",
         extra_prompt: str = "",
         reply_reason: str = "",
         reply_tool_args: Any = None,
@@ -96,7 +134,8 @@ class WritingStyleRouterPlugin(MaiBotPlugin):
         del kwargs
         if not self.config.plugin.enabled:
             return None
-        query = _flatten((reply_reason, reply_tool_args))
+        user_query = self._session_queries.get(session_id, "")
+        query = _flatten((user_query, reply_reason, reply_tool_args))
         if not query:
             return None
         is_review = any(marker in query for marker in REVIEW_MARKERS) and self.config.styles.review

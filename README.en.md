@@ -1,6 +1,6 @@
 # Writing Style Router
 
-An on-demand writing prompt plugin for MaiBot. It hooks into `maisaka.replyer.before_request` and appends style guidance only when the current request clearly asks for creative writing or text review.
+An on-demand writing prompt plugin for MaiBot. It observes the current user message through `chat.receive.before_process`, then uses `maisaka.replyer.before_request` to append style guidance only when the request clearly asks for creative writing or text review.
 
 ## Features
 
